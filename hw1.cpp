@@ -13,10 +13,10 @@ using namespace std;
 using namespace chrono;
 
 class piece { // used to slice file to K
-  public : int start, end;
+  public : int start, mid, end;
 
   public : piece(int a, int b) {
-    start = a, end = b;
+    start = a, end = b, mid = 0;
   } // constructor
 }; // class piece
 
@@ -26,9 +26,10 @@ void readFile(vector<int>& arr, ifstream& file);
 char* StringTransToCharPointer(string s);
 void sliceToK(vector<piece*>& pieces, int size, int k);
 void bubbleSort(vector<int>& arr, int start, int end);
-void mergeSort(vector<int>& arr, int start, int end, mutex& mtx);
+void mergeSort(vector<int>& arr, int left, int mid, int right);
 void method_1(vector<int>& arr, int k);
 void method_2(vector<int>& arr, int k);
+void method_3(vector<int>& arr, int k);
 void method_4(vector<int>& arr, int k);
 void printTime(milliseconds duration);
 
@@ -135,28 +136,21 @@ void bubbleSort(vector<int>& arr, int start, int end) {
 } // bubbleSort()
 
 
-void mergeSort(vector<int>& arr, int left, int right, mutex& mtx) {
-  if (left >= right) return;
-
-  int mid = (left + right) / 2;
-  mergeSort(arr, left,    mid,   mtx);
-  mergeSort(arr, mid + 1, right, mtx);
-
+void mergeSort(vector<int>& arr, int left, int mid, int right) {
   vector<int> temp(right - left + 1); // Merge left and right subarrays
-  int i = left, j = mid + 1, k = 0;
 
-  while (i <= mid && j <= right) {
+  int i = left, j = mid, k = 0;
+
+  while (i < mid && j <= right) {
     if (arr[i] < arr[j]) temp[k++] = arr[i++];
     else                 temp[k++] = arr[j++];
   } // while()
 
-  while (i <= mid)   temp[k++] = arr[i++];
+  while (i <  mid)   temp[k++] = arr[i++];
   while (j <= right) temp[k++] = arr[j++];
 
   k = 0; // Copy back to the original vector
-  //mtx.lock();
   for (i = left; i <= right; i++) arr[i] = temp[k++];
-  //mtx.unlock();
 } // mergeSort()
 
 
@@ -166,7 +160,7 @@ void method_1(vector<int>& arr, int k) {
   bubbleSort(arr, 0, arr.size() - 1); // Execute bubbleSort
 
   auto end = high_resolution_clock::now(); // Stop timing
-  auto duration = duration_cast<std::chrono::milliseconds>(end - start); // Calculate execution time in milliseconds
+  auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
   //for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
   printTime(duration);
@@ -174,6 +168,7 @@ void method_1(vector<int>& arr, int k) {
 
 
 void method_2(vector<int>& arr, int k) {
+/*
   vector<piece*> pieces; // Split the array into pieces, where piece is a struct
   sliceToK(pieces, arr.size(), k); // containing the start and end positions of the block
 
@@ -198,7 +193,50 @@ void method_2(vector<int>& arr, int k) {
 
   //for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
   printTime(duration);
+  */
 } // method_1()
+
+
+void method_3(vector<int>& arr, int k) {/*
+  vector<piece*> pieces; // Split the array into pieces, where piece is a struct
+  sliceToK(pieces, arr.size(), k); // containing the start and end positions of the block
+
+  auto start = high_resolution_clock::now(); // Start timing
+
+  pid_t pid;
+  int status;
+
+  for(int a = 0; a < k; a++) { // Fork k child processes to perform bubble sort
+    pid = fork();
+
+    if(pid == 0) { // Child process
+      bubbleSort(arr, pieces[a]->start, pieces[a]->end);
+      exit(0);
+    } // if()
+  } // for(a)
+
+  while(wait(&status) > 0) ; // Wait for all child processes to finish
+
+  for(int i = 0; i < k - 1; i++) { // Fork k - 1 child processes to perform merge sort
+    pid = fork();
+
+    if(pid == 0) { // Child process
+      int left_piece = i;
+      int right_piece = i + 1;
+      vector<int> merged(pieces[left_piece].size() + pieces[right_piece].size());
+      merge(pieces[left_piece].begin(), pieces[left_piece].end(), pieces[right_piece].begin(), pieces[right_piece].end(), merged.begin());
+      pieces[right_piece] = merged;
+      exit(0);
+    } // if()
+  } // for(i)
+
+    // Wait for all child processes to finish
+    while(wait(&status) > 0) ;
+
+    // The final sorted array is stored in pieces[k-1]
+    vector<int> sorted_arr = pieces[k-1];
+    */
+} // method_3
 
 
 void method_4(vector<int>& arr, int k) {
@@ -207,20 +245,31 @@ void method_4(vector<int>& arr, int k) {
 
   auto start = high_resolution_clock::now(); // Start timing
 
-  vector<thread> threads(k); // Create threads and execute bubbleSort
+  vector<thread> thread_bubble(k); // Create threads and execute bubbleSort
   for (int a = 0; a < k; a++)
-    threads[a] = thread(bubbleSort, ref(arr), pieces[a]->start, pieces[a]->end);
+    thread_bubble[a] = thread(bubbleSort, ref(arr), pieces[a]->start, pieces[a]->end);
+  for (int a = 0; a < k; a++) thread_bubble[a].join(); // Wait for all threads to finish
 
-  for (int a = 0; a < k; a++) threads[a].join(); // Wait for all threads to finish
 
-  mutex mtx;
-  thread t(mergeSort, ref(arr), 0, arr.size() - 1, ref(mtx)); // Create threads and execute mergeSort
-  t.join();
+  while (pieces.size() > 1) { // Create threads and execute mergeSort
+    int a = 0;
+
+    while(a + 1 < pieces.size()) {
+      pieces[a]->mid = pieces[a + 1]->start;
+      pieces[a]->end = pieces[a + 1]->end;
+      pieces.erase(pieces.begin() + ++a);
+    } // while()
+
+    vector<thread> thread_merge(pieces.size());
+    for (int b = 0; b < pieces.size(); b++)
+      thread_merge[b] = thread(mergeSort, ref(arr), pieces[b]->start, pieces[b]->mid, pieces[b]->end);
+    for (int b = 0; b < pieces.size(); b++) thread_merge[b].join(); // Wait for all threads to finish
+  } // while()
 
   auto end = high_resolution_clock::now(); // Stop timing
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
-  // for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
+  for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
   printTime(duration);
 } // method_4()
 

@@ -1,16 +1,20 @@
-#include <iostream>
+#include <sstream>
 #include <fstream>
+#include <iostream>
 #include <vector>
 #include <thread>
 #include <mutex>
 #include <ctime>
 #include <chrono>
 #include <unistd.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <sys/wait.h>
-#include <sstream>
+
 
 using namespace std;
 using namespace chrono;
+
 
 class piece { // used to slice file to K
   public : int start, mid, end;
@@ -20,21 +24,37 @@ class piece { // used to slice file to K
   } // constructor
 }; // class piece
 
+struct bubbleArgs {
+  int *arr;
+  int start,end;
+}; // struct bubbleArgs
+
+struct mergeArgs {
+  int *arr;
+  int left, mid, right;
+}; // struct mergeArgs
+
 
 void printMenu(char** filename, int& k, int& method);
-void readFile(vector<int>& arr, ifstream& file);
+void readFile(vector<int>& vec, ifstream& file);
 char* StringTransToCharPointer(string s);
 void sliceToK(vector<piece*>& pieces, int size, int k);
-void bubbleSort(vector<int>& arr, int start, int end);
-void mergeSort(vector<int>& arr, int left, int mid, int right);
-void method_1(vector<int>& arr, int k);
-void method_2(vector<int>& arr, int k);
-void method_3(vector<int>& arr, int k);
-void method_4(vector<int>& arr, int k);
+
+void bubbleSort(int* arr, int start, int end);
+void *bubbleSort(void *args);
+void mergeSort(int* arr, int left, int mid, int right);
+void *mergeSort(void *args);
+
+void method_1(int* arr, int size, int k);
+void method_2(int* arr, int size, int k);
+void method_3(int* arr, int size, int k);
+void method_4(int* arr, int size, int k);
+
 void printTime(milliseconds duration);
 
 
 int main() {
+
   while(true) {
     char* fileName;
     int k, method;
@@ -47,12 +67,20 @@ int main() {
      if (method == -1 || !file) cout << "Input error, please try again.\n";
     } while(method == -1 || !file);
 
-    vector<int> arr;
-    readFile(arr, file); // Read data from file
+    vector<int> vec;
+    readFile(vec, file); // Read data from file
+    int size = vec.size();
+    int *arr = new int[size];  // allocate array
 
-    if      (method == 1) method_1(arr, k);
-    else if (method == 2) method_2(arr, k);
-    else if (method == 4) method_4(arr, k);
+    copy(vec.begin(), vec.end(), arr);
+    vec.clear();
+
+    if      (method == 1) method_1(arr, size, k);
+    else if (method == 2) method_2(arr, size, k);
+    else if (method == 3) method_3(arr, size, k);
+    else if (method == 4) method_4(arr, size, k);
+
+    delete[] arr;
   } // while(true)
 
 } // main()
@@ -65,14 +93,13 @@ void printMenu(char** fileName, int& k, int& method) {
   cout << "Please enter the file name : ";
   getline(cin, s);
   s = s + ".txt";
-  //cout << "s = " << s << "\n";
   *fileName = StringTransToCharPointer(s);
-  //cout << "fileName = " << *fileName << "\n";
 
   cout << "Please enter the number of partitions : ";
   getline(cin, s);
 
-  for (unsigned int a = 0; a < s.length(); a++) { // check input K
+  k = 0;
+  for (int a = 0; a < s.length(); a++) { // check input K
     if (!isdigit(s[a])) allIsDigit = false;
     else k = k * 10 + (s[a] - '0');
   } // for(a)
@@ -87,9 +114,9 @@ void printMenu(char** fileName, int& k, int& method) {
 } // printMenu()
 
 
-void readFile(vector<int>& arr, ifstream& file) {
+void readFile(vector<int>& vec, ifstream& file) {
     int temp; // Read data and store it in a vector
-    while(file >> temp) arr.push_back(temp);
+    while(file >> temp) vec.push_back(temp);
 
     file.close(); // close file
 } // readFile()
@@ -97,7 +124,7 @@ void readFile(vector<int>& arr, ifstream& file) {
 
 char* StringTransToCharPointer(string s) {
   char* fileName = new char[s.length() + 1]; // string transfer to char[]
-  for (unsigned int a = 0; a < s.length(); a++) fileName[a] = s[a];
+  for (int a = 0; a < s.length(); a++) fileName[a] = s[a];
   fileName[s.length()] = '\0';
   return fileName;
 } // StringTransToCharStar()
@@ -105,20 +132,19 @@ char* StringTransToCharPointer(string s) {
 
 void sliceToK(vector<piece*>& pieces, int size, int k) {
   int pieceCapacity = size / k;
-  unsigned int odd  = size % k;
+  int odd           = size % k;
 
-  for (int a = 0 ; a < k ; a++) {
+  for (int a = 0; a < k; a++) {
     int start = a       * pieceCapacity;
     int end   = (a + 1) * pieceCapacity - 1;
 
     if (end > size) end = size;
-
     piece* p = new piece(start, end);
     pieces.push_back(p);
   } // for(a)
 
   if (odd > 0) {
-    for (unsigned int a = 0; a < pieces.size(); a++) {
+    for (int a = 0; a < pieces.size(); a++) {
       if      (a == 0)  pieces[0]->end = pieces[0]->end + 1;
       else if (a < odd) pieces[a]->start = pieces[a]->start + a,   pieces[a]->end = pieces[a]->end + a + 1;
       else              pieces[a]->start = pieces[a]->start + odd, pieces[a]->end = pieces[a]->end + odd;
@@ -128,18 +154,24 @@ void sliceToK(vector<piece*>& pieces, int size, int k) {
 } // sliceToK()
 
 
-void bubbleSort(vector<int>& arr, int start, int end) {
-  for (int i = start; i < end; i++)
-    for (int j = i + 1; j <= end; j++)
-      if (arr[i] > arr[j])
-        swap(arr[i], arr[j]);
+void bubbleSort(int* arr, int start, int end) {
+  for (int a = start; a < end; a++)
+    for (int b = a + 1; b <= end; b++)
+      if (arr[a] > arr[b])
+        swap(arr[a], arr[b]);
 } // bubbleSort()
 
 
-void mergeSort(vector<int>& arr, int left, int mid, int right) {
-  vector<int> temp(right - left + 1); // Merge left and right subarrays
+void *bubbleSort(void *args) {
+  bubbleArgs *ba = (bubbleArgs*)args;
+  bubbleSort(ba->arr, ba->start, ba->end);
+  pthread_exit( 0 );
+} // *bubbleSort()
 
+
+void mergeSort(int* arr, int left, int mid, int right) {
   int i = left, j = mid, k = 0;
+  vector<int> temp(right - left + 1); // Merge left and right subarrays
 
   while (i < mid && j <= right) {
     if (arr[i] < arr[j]) temp[k++] = arr[i++];
@@ -149,110 +181,41 @@ void mergeSort(vector<int>& arr, int left, int mid, int right) {
   while (i <  mid)   temp[k++] = arr[i++];
   while (j <= right) temp[k++] = arr[j++];
 
-  k = 0; // Copy back to the original vector
-  for (i = left; i <= right; i++) arr[i] = temp[k++];
+  for (i = left, k = 0; i <= right; i++) arr[i] = temp[k++]; // Copy back to the original vector
 } // mergeSort()
 
 
-void method_1(vector<int>& arr, int k) {
+void *mergeSort(void *args) {
+  mergeArgs *ma = (mergeArgs*)args;
+  mergeSort(ma->arr, ma->left, ma->mid, ma->right);
+  pthread_exit( 0 );
+} // *bubbleSort()
+
+
+void method_1(int* arr, int size, int k) {
   auto start = high_resolution_clock::now(); // Start timing
 
-  bubbleSort(arr, 0, arr.size() - 1); // Execute bubbleSort
+  bubbleSort(arr, 0, size - 1); // Execute bubbleSort
 
   auto end = high_resolution_clock::now(); // Stop timing
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
-  //for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
+  for (int i = 0; i < size; i++) cout << arr[i] << "\n";
   printTime(duration);
 } // method_1()
 
 
-void method_2(vector<int>& arr, int k) {
-/*
-  vector<piece*> pieces; // Split the array into pieces, where piece is a struct
-  sliceToK(pieces, arr.size(), k); // containing the start and end positions of the block
-
+void method_2(int* arr, int size, int k) {
   auto start = high_resolution_clock::now(); // Start timing
-
-  pid_t pid = fork(); // fork a process
-
-  if (pid == 0) { // child process
-    for (int a = 0; a < k; a++) // Perform bubble sort on each data segment
-      bubbleSort(arr, pieces[a]->start, pieces[a]->end);
-    exit(0); // End child process
-  } // if()
-  else { // parent process
-    waitpid(pid, NULL, 0); // Wait for child process to finish
-
-    mutex mtx;
-    mergeSort(arr, 0, arr.size() - 1, mtx); // Perform merge sort
-  } // else
-
-  auto end = high_resolution_clock::now(); // Stop timing
-  auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
-
-  //for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
-  printTime(duration);
-  */
-} // method_1()
-
-
-void method_3(vector<int>& arr, int k) {/*
   vector<piece*> pieces; // Split the array into pieces, where piece is a struct
-  sliceToK(pieces, arr.size(), k); // containing the start and end positions of the block
+  sliceToK(pieces, size, k); // containing the start and end positions of the block
 
-  auto start = high_resolution_clock::now(); // Start timing
-
-  pid_t pid;
-  int status;
-
-  for(int a = 0; a < k; a++) { // Fork k child processes to perform bubble sort
-    pid = fork();
-
-    if(pid == 0) { // Child process
-      bubbleSort(arr, pieces[a]->start, pieces[a]->end);
-      exit(0);
-    } // if()
-  } // for(a)
-
-  while(wait(&status) > 0) ; // Wait for all child processes to finish
-
-  for(int i = 0; i < k - 1; i++) { // Fork k - 1 child processes to perform merge sort
-    pid = fork();
-
-    if(pid == 0) { // Child process
-      int left_piece = i;
-      int right_piece = i + 1;
-      vector<int> merged(pieces[left_piece].size() + pieces[right_piece].size());
-      merge(pieces[left_piece].begin(), pieces[left_piece].end(), pieces[right_piece].begin(), pieces[right_piece].end(), merged.begin());
-      pieces[right_piece] = merged;
-      exit(0);
-    } // if()
-  } // for(i)
-
-    // Wait for all child processes to finish
-    while(wait(&status) > 0) ;
-
-    // The final sorted array is stored in pieces[k-1]
-    vector<int> sorted_arr = pieces[k-1];
-    */
-} // method_3
-
-
-void method_4(vector<int>& arr, int k) {
-  vector<piece*> pieces; // Split the array into pieces, where piece is a struct
-  sliceToK(pieces, arr.size(), k); // containing the start and end positions of the block
-
-  auto start = high_resolution_clock::now(); // Start timing
-
-  vector<thread> thread_bubble(k); // Create threads and execute bubbleSort
-  for (int a = 0; a < k; a++)
-    thread_bubble[a] = thread(bubbleSort, ref(arr), pieces[a]->start, pieces[a]->end);
-  for (int a = 0; a < k; a++) thread_bubble[a].join(); // Wait for all threads to finish
-
+  for (int a = 0; a < k; a++) // Perform bubble sort on each data segment
+    bubbleSort(arr, pieces[a]->start, pieces[a]->end);
 
   while (pieces.size() > 1) { // Create threads and execute mergeSort
     int a = 0;
+    if (pieces.size() % 2) pieces[pieces.size() - 1]->mid = 0; // to mark the lonely block
 
     while(a + 1 < pieces.size()) {
       pieces[a]->mid = pieces[a + 1]->start;
@@ -260,17 +223,98 @@ void method_4(vector<int>& arr, int k) {
       pieces.erase(pieces.begin() + ++a);
     } // while()
 
-    vector<thread> thread_merge(pieces.size());
     for (int b = 0; b < pieces.size(); b++)
-      thread_merge[b] = thread(mergeSort, ref(arr), pieces[b]->start, pieces[b]->mid, pieces[b]->end);
-    for (int b = 0; b < pieces.size(); b++) thread_merge[b].join(); // Wait for all threads to finish
+      if (pieces[b]->mid) // We need to merge two blocks, don't merge the lonely block
+        mergeSort(arr, pieces[b]->start, pieces[b]->mid, pieces[b]->end);
   } // while()
+
+  pieces.clear();
 
   auto end = high_resolution_clock::now(); // Stop timing
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
-  for (int i = 0; i < arr.size(); i++) cout << arr[i] << "\n";
+  //for (int i = 0; i < size; i++) cout << arr[i] << "\n";
   printTime(duration);
+} // method_2()
+
+
+void method_3(int* arr, int size, int k) {
+  auto start = high_resolution_clock::now(); // Start timing
+
+  int shmid = shmget(IPC_PRIVATE, size* sizeof(int), IPC_CREAT | 0600);
+  int *shmaddr = NULL; // Later, a virtual space will be created for sorting.
+  vector<pid_t>  pids;
+  vector<piece*> pieces; // Split the array into pieces, where piece is a struct
+  sliceToK(pieces, size, k); // containing the start and end positions of the block
+
+  for (int a = 0; a < k; a++) { // Perform bubble sort on each data segment
+    pid_t pid = fork();
+
+    if (pid == -1) { // error
+      perror("fork error");
+      exit( EXIT_FAILURE );
+    } // if()
+    else if (!pid) { // child process
+      shmaddr = (int*)shmat(shmid, NULL, 0);
+      copy(arr + pieces[a]->start, arr + pieces[a]->end + 1, shmaddr + pieces[a]->start);
+      bubbleSort(shmaddr, pieces[a]->start, pieces[a]->end);
+      shmdt(shmaddr);
+      exit(EXIT_SUCCESS);
+    } // else if()
+    else pids.push_back(pid); // parent process
+  } // for(a)
+
+  for (int a = 0; a < pids.size(); a++) // wait all processes done
+    waitpid(pids.at(a), nullptr, 0);
+
+
+  while (pieces.size() > 1) { // Create threads and execute mergeSort
+    int a = 0;
+    if (pieces.size() % 2) pieces[pieces.size() - 1]->mid = 0; // to mark the lonely block
+
+    while(a + 1 < pieces.size()) {
+      pieces[a]->mid = pieces[a + 1]->start;
+      pieces[a]->end = pieces[a + 1]->end;
+      pieces.erase(pieces.begin() + ++a);
+    } // while()
+
+    pids.clear();
+    for (int b = 0; b < pieces.size(); b++) {
+      pid_t pid = fork();
+
+      if (pid == -1) { // error
+        perror("fork error");
+        exit( EXIT_FAILURE );
+      } // if()
+      else if (!pid && pieces[b]->mid) { // child process && We need to merge two blocks, don't merge the lonely block
+        shmaddr = (int*)shmat(shmid, NULL, 0);
+        mergeSort(shmaddr, pieces[b]->start, pieces[b]->mid, pieces[b]->end);
+        shmdt(shmaddr);
+        exit(EXIT_SUCCESS);
+      } // else if()
+      else pids.push_back(pid); // parent process
+    } // for(b)
+
+    for (int b = 0; b < pids.size(); b++) // wait all processes done
+      waitpid(pids.at(b), nullptr, 0);
+  } // while()
+
+  shmaddr = (int*)shmat(shmid, NULL, 0); // Copy the data
+  copy(shmaddr, shmaddr + size, arr); // from the virtual space back to arr
+  shmdt(shmaddr);
+  shmctl(shmid, IPC_RMID, NULL);
+
+  pieces.clear();
+  auto end = high_resolution_clock::now(); // Stop timing
+  auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
+
+  // for (int a = 0; a < size; a++) cout << arr[a] << "\n";
+  printTime(duration);
+} // method_3()
+
+
+void method_4(int* arr, int size, int k) {
+
 } // method_4()
 
 
@@ -294,4 +338,4 @@ void printTime(milliseconds duration) {
   result << offset.str();
 
   cout << result.str() << "\n\n--------------------\n\n";
-} // printTime(()
+} // printTime()

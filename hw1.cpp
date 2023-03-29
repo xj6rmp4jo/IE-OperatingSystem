@@ -2,9 +2,8 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
-#include <thread>
-#include <mutex>
 #include <ctime>
+#include <cstring>
 #include <chrono>
 #include <unistd.h>
 #include <sys/ipc.h>
@@ -35,9 +34,10 @@ struct mergeArgs {
 }; // struct mergeArgs
 
 
-void printMenu(char** filename, int& k, int& method);
-void printTime(milliseconds duration);
+void printMenu(string& filename, int& k, int& method);
+void printTime(milliseconds duration, ofstream& file);
 void readFile(vector<int>& vec, ifstream& file);
+void writeFile(int* arr, int size, string fileName, int method, milliseconds time);
 char* StringTransToCharPointer(string s);
 void sliceToK(vector<piece*>& pieces, int size, int k);
 
@@ -46,22 +46,22 @@ void *bubbleSort(void *args);
 void mergeSort(int* arr, int left, int mid, int right);
 void *mergeSort(void *args);
 
-void method_1(int* arr, int size, int k);
-void method_2(int* arr, int size, int k);
-void method_3(int* arr, int size, int k);
-void method_4(int* arr, int size, int k);
+milliseconds method_1(int* arr, int size, int k);
+milliseconds method_2(int* arr, int size, int k);
+milliseconds method_3(int* arr, int size, int k);
+milliseconds method_4(int* arr, int size, int k);
 
 
 int main() {
 
   while(true) {
-    char* fileName;
+    string fileName;
     int k, method;
     ifstream file;
 
     do {
-      printMenu(&fileName, k, method);
-      file.open(fileName); // try to open file
+      printMenu(fileName, k, method);
+      file.open(StringTransToCharPointer(fileName + ".txt")); // try to open file
 
      if (method == -1 || !file) cout << "Input error, please try again.\n\n";
     } while(method == -1 || !file);
@@ -70,29 +70,29 @@ int main() {
     readFile(vec, file); // Read data from file
     int size = vec.size();
     int *arr = new int[size];  // allocate array
+    milliseconds time;
 
     copy(vec.begin(), vec.end(), arr);
     vec.clear();
 
-    if      (method == 1) method_1(arr, size, k);
-    else if (method == 2) method_2(arr, size, k);
-    else if (method == 3) method_3(arr, size, k);
-    else if (method == 4) method_4(arr, size, k);
+    if      (method == 1) time = method_1(arr, size, k);
+    else if (method == 2) time = method_2(arr, size, k);
+    else if (method == 3) time = method_3(arr, size, k);
+    else if (method == 4) time = method_4(arr, size, k);
 
-    delete[] arr;
+    writeFile(arr, size, fileName, method, time);
+    cout << "\n";
   } // while(true)
 
 } // main()
 
 
-void printMenu(char** fileName, int& k, int& method) {
+void printMenu(string& fileName, int& k, int& method) {
   string s;
   bool allIsDigit = true;
 
   cout << "Please enter the file name : ";
-  getline(cin, s);
-  s = s + ".txt";
-  *fileName = StringTransToCharPointer(s);
+  getline(cin, fileName);
 
   cout << "Please enter the number of partitions : ";
   getline(cin, s);
@@ -113,12 +113,51 @@ void printMenu(char** fileName, int& k, int& method) {
 } // printMenu()
 
 
+void printTime(milliseconds duration, ofstream& file) {
+  cout << "CPU Time : " << duration.count() << "ms\n";
+  file << "CPU Time : " << duration.count() << "ms\n";
+
+  stringstream result, offset; // Below is the code for handling Output Time
+  time_t t = time(nullptr); // Get the current time
+  tm local_tm = *localtime(&t);
+
+  char buffer[80]; // Format the time string
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &local_tm);
+  result << buffer;
+
+  time_t utc = time(nullptr); // Get the local time zone
+  tm utc_tm = *gmtime(&utc);
+  int offset_hour = (difftime(mktime(&local_tm), mktime(&utc_tm)) / 3600);
+  if (offset_hour >= 0) offset << "+";
+  if (offset_hour < 10) offset << "0";
+  offset << offset_hour << ":00";
+  result << offset.str();
+
+  file << "Output Time : " << result.str();
+} // printTime()
+
+
 void readFile(vector<int>& vec, ifstream& file) {
     int temp; // Read data and store it in a vector
     while(file >> temp) vec.push_back(temp);
 
     file.close(); // close file
 } // readFile()
+
+
+void writeFile(int* arr, int size, string fileName, int method, milliseconds time) {
+  string s = fileName + "_output" + char(method + '0') + ".txt";
+  ofstream file;
+  file.open(StringTransToCharPointer(fileName + "_output" + char(method + '0') + ".txt"));
+  file << "Sort : \n";
+
+  for (int a = 0; a < size; a++)
+    file << arr[a] << "\n";
+
+  printTime(time, file);
+  file.close();
+  delete[] arr;
+} // whriteFile()
 
 
 char* StringTransToCharPointer(string s) {
@@ -197,7 +236,7 @@ void *mergeSort(void *args) {
 } // *bubbleSort()
 
 
-void method_1(int* arr, int size, int k) {
+milliseconds method_1(int* arr, int size, int k) {
   auto start = high_resolution_clock::now(); // Start timing
 
   bubbleSort(arr, 0, size - 1); // Execute bubbleSort
@@ -206,11 +245,11 @@ void method_1(int* arr, int size, int k) {
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
   //for (int i = 0; i < size; i++) cout << arr[i] << "\n";
-  printTime(duration);
+  return duration;
 } // method_1()
 
 
-void method_2(int* arr, int size, int k) {
+milliseconds method_2(int* arr, int size, int k) {
   auto start = high_resolution_clock::now(); // Start timing
   vector<piece*> pieces; // Split the array into pieces, where piece is a struct
   sliceToK(pieces, size, k); // containing the start and end positions of the block
@@ -239,11 +278,11 @@ void method_2(int* arr, int size, int k) {
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
   //for (int i = 0; i < size; i++) cout << arr[i] << "\n";
-  printTime(duration);
+  return duration;
 } // method_2()
 
 
-void method_3(int* arr, int size, int k) {
+milliseconds method_3(int* arr, int size, int k) {
   auto start = high_resolution_clock::now(); // Start timing
 
   int shmid = shmget(IPC_PRIVATE, size* sizeof(int), IPC_CREAT | 0600);
@@ -314,11 +353,11 @@ void method_3(int* arr, int size, int k) {
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
   // for (int a = 0; a < size; a++) cout << arr[a] << "\n";
-  printTime(duration);
+  return duration;
 } // method_3()
 
 
-void method_4(int* arr, int size, int k) {
+milliseconds method_4(int* arr, int size, int k) {
   auto start = high_resolution_clock::now(); // Start timing
 
   vector<pthread_t> threads;
@@ -385,28 +424,5 @@ void method_4(int* arr, int size, int k) {
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
   //for (int a = 0; a < size; a++) cout << arr[a] << "\n";
-  printTime(duration);
+  return duration;
 } // method_4()
-
-
-void printTime(milliseconds duration) {
-  cout << "\nCPU Time : " << duration.count()<< "ms\n";
-
-  stringstream result, offset; // Below is the code for handling Output Time
-  time_t t = time(nullptr); // Get the current time
-  tm local_tm = *localtime(&t);
-
-  char buffer[80]; // Format the time string
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &local_tm);
-  result << buffer;
-
-  time_t utc = time(nullptr); // Get the local time zone
-  tm utc_tm = *gmtime(&utc);
-  int offset_hour = (difftime(mktime(&local_tm), mktime(&utc_tm)) / 3600);
-  if (offset_hour >= 0) offset << "+";
-  if (offset_hour < 10) offset << "0";
-  offset << offset_hour << ":00";
-  result << offset.str();
-
-  cout << result.str() << "\n\n--------------------\n\n";
-} // printTime()

@@ -31,11 +31,12 @@ struct bubbleArgs {
 
 struct mergeArgs {
   int *arr;
-  int left, mid, right;
+  int start, mid, end;
 }; // struct mergeArgs
 
 
 void printMenu(char** filename, int& k, int& method);
+void printTime(milliseconds duration);
 void readFile(vector<int>& vec, ifstream& file);
 char* StringTransToCharPointer(string s);
 void sliceToK(vector<piece*>& pieces, int size, int k);
@@ -50,8 +51,6 @@ void method_2(int* arr, int size, int k);
 void method_3(int* arr, int size, int k);
 void method_4(int* arr, int size, int k);
 
-void printTime(milliseconds duration);
-
 
 int main() {
 
@@ -64,7 +63,7 @@ int main() {
       printMenu(&fileName, k, method);
       file.open(fileName); // try to open file
 
-     if (method == -1 || !file) cout << "Input error, please try again.\n";
+     if (method == -1 || !file) cout << "Input error, please try again.\n\n";
     } while(method == -1 || !file);
 
     vector<int> vec;
@@ -138,16 +137,21 @@ void sliceToK(vector<piece*>& pieces, int size, int k) {
     int start = a       * pieceCapacity;
     int end   = (a + 1) * pieceCapacity - 1;
 
-    if (end > size) end = size;
+    if (end > size)
+      end = size;
+
     piece* p = new piece(start, end);
     pieces.push_back(p);
   } // for(a)
 
   if (odd > 0) {
     for (int a = 0; a < pieces.size(); a++) {
-      if      (a == 0)  pieces[0]->end = pieces[0]->end + 1;
-      else if (a < odd) pieces[a]->start = pieces[a]->start + a,   pieces[a]->end = pieces[a]->end + a + 1;
-      else              pieces[a]->start = pieces[a]->start + odd, pieces[a]->end = pieces[a]->end + odd;
+      if (a == 0)
+        pieces[0]->end = pieces[0]->end + 1;
+      else if (a < odd)
+        pieces[a]->start = pieces[a]->start + a,   pieces[a]->end = pieces[a]->end + a + 1;
+      else
+        pieces[a]->start = pieces[a]->start + odd, pieces[a]->end = pieces[a]->end + odd;
     } // for(a)
   } // if()
 
@@ -181,13 +185,14 @@ void mergeSort(int* arr, int left, int mid, int right) {
   while (i <  mid)   temp[k++] = arr[i++];
   while (j <= right) temp[k++] = arr[j++];
 
-  for (i = left, k = 0; i <= right; i++) arr[i] = temp[k++]; // Copy back to the original vector
+  for (i = left, k = 0; i <= right; i++) // Copy back to the original vector
+    arr[i] = temp[k++];
 } // mergeSort()
 
 
 void *mergeSort(void *args) {
   mergeArgs *ma = (mergeArgs*)args;
-  mergeSort(ma->arr, ma->left, ma->mid, ma->right);
+  mergeSort(ma->arr, ma->start, ma->mid, ma->end);
   pthread_exit( 0 );
 } // *bubbleSort()
 
@@ -200,7 +205,7 @@ void method_1(int* arr, int size, int k) {
   auto end = high_resolution_clock::now(); // Stop timing
   auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
 
-  for (int i = 0; i < size; i++) cout << arr[i] << "\n";
+  //for (int i = 0; i < size; i++) cout << arr[i] << "\n";
   printTime(duration);
 } // method_1()
 
@@ -272,7 +277,7 @@ void method_3(int* arr, int size, int k) {
     int a = 0;
     if (pieces.size() % 2) pieces[pieces.size() - 1]->mid = 0; // to mark the lonely block
 
-    while(a + 1 < pieces.size()) {
+    while(a + 1 < pieces.size()) { // merge two blocks to one
       pieces[a]->mid = pieces[a + 1]->start;
       pieces[a]->end = pieces[a + 1]->end;
       pieces.erase(pieces.begin() + ++a);
@@ -314,7 +319,73 @@ void method_3(int* arr, int size, int k) {
 
 
 void method_4(int* arr, int size, int k) {
+  auto start = high_resolution_clock::now(); // Start timing
 
+  vector<pthread_t> threads;
+  vector<piece*> pieces; // Split the array into pieces, where piece is a struct
+  sliceToK(pieces, size, k); // containing the start and end positions of the block
+
+  bubbleArgs** bubbleArgsArr = new bubbleArgs*[k];
+
+  for (int a = 0; a < k; a++) { // Perform bubble sort on each data segment
+    pthread_t t;
+    bubbleArgsArr[a] = new bubbleArgs;
+    bubbleArgsArr[a]->arr   = arr;
+    bubbleArgsArr[a]->start = pieces[a]->start;
+    bubbleArgsArr[a]->end   = pieces[a]->end;
+    pthread_create(&t, NULL, bubbleSort, (void*)bubbleArgsArr[a]);  // create thread
+    threads.push_back( t );
+  } // for(a)
+
+  for (int a = 0; a < threads.size(); a++) {
+    pthread_join( threads.at(a), NULL );
+    delete[] bubbleArgsArr[a];
+  } // for(a)
+
+  delete[] bubbleArgsArr;
+
+
+  while (pieces.size() > 1) { // Create threads and execute mergeSort
+    int a = 0;
+    if (pieces.size() % 2) pieces[pieces.size() - 1]->mid = 0; // to mark the lonely block
+
+    while(a + 1 < pieces.size()) { // merge two blocks to one
+      pieces[a]->mid = pieces[a + 1]->start;
+      pieces[a]->end = pieces[a + 1]->end;
+      pieces.erase(pieces.begin() + ++a);
+    } // while()
+
+    threads.clear();
+    mergeArgs** mergeArgsArr = new mergeArgs*[pieces.size()];
+
+    for (int b = 0; b < pieces.size(); b++) {
+      pthread_t t;
+
+      if (pieces[b]->mid) { // merge two blocks, but don't merge the lonely block
+        mergeArgsArr[b] = new mergeArgs;
+        mergeArgsArr[b]->arr   = arr;
+        mergeArgsArr[b]->start = pieces[b]->start;
+        mergeArgsArr[b]->mid   = pieces[b]->mid;
+        mergeArgsArr[b]->end   = pieces[b]->end;
+        pthread_create(&t, NULL, mergeSort, (void*)mergeArgsArr[b]);
+        threads.push_back(t);
+      } // if()
+    } // for(b)
+
+    for (int a = 0; a < threads.size(); a++) {
+      pthread_join(threads.at(a), NULL);
+      delete[] mergeArgsArr[a];
+    } // for(a)
+
+    delete[] mergeArgsArr;
+  } // while()
+
+  pieces.clear();
+  auto end = high_resolution_clock::now(); // Stop timing
+  auto duration = duration_cast<milliseconds>(end - start); // Calculate execution time in milliseconds
+
+  //for (int a = 0; a < size; a++) cout << arr[a] << "\n";
+  printTime(duration);
 } // method_4()
 
 

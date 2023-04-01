@@ -35,6 +35,6 @@
  
   ![程式執行範例](/img/程式執行範例.png)
 
-<a href="https://github.com/xj6rmp4jo/IE-OperatingSystem/blob/main/作業要求/HW1說明.pdf" target="_blank">點此以閱讀更詳細的作業需求</a>
+<a href="https://github.com/xj6rmp4jo/IE-OperatingSystem/blob/main/作業要求/HW1說明.pdf" download>點此以閱讀更詳細的作業需求</a>
 
 ## 書面報告 :

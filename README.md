@@ -2,7 +2,7 @@
 
 ## 作業說明
 <details>
-  <summary>作業說明</summary>
+  <summary>點此以展開/收起詳細信息</summary>
   
   ### 完成 4 個任務 :
   1. 將 N 筆數目字直接進行 BubbleSort，並顯示 CPU 執行時間。
@@ -40,8 +40,9 @@
   ![程式執行範例](/img/程式執行範例.png)
 
 <a href="https://github.com/xj6rmp4jo/IE-OperatingSystem/blob/main/作業要求/HW1說明.pdf" target="_blank">點此以詳閱作業說明文件</a>
-  
 </details>
 
 
-## 書面報告 :
+## 書面報告
+  <a href="https://github.com/xj6rmp4jo/IE-OperatingSystem/blob/main/書面報告.pdf" target="_blank">點此以詳閱書面報告</a>
+
